@@ -1,0 +1,39 @@
+{
+  "name": "backend-residuos-urbanos",
+  "version": "1.0.0",
+  "description": "Backend del sistema de gestión de recolección de residuos urbanos — Villa María",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.17.0",
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.8.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.10",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.3",
+    "express-rate-limit": "^8.6.2",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
+    "json2csv": "^6.0.0-alpha.2",
+    "jsonwebtoken": "^9.0.2",
+    "lodash": "^4.17.21",
+    "morgan": "^1.10.0",
+    "mysql2": "^3.9.2",
+    "nodemailer": "^9.0.3",
+    "otplib": "^12.0.1",
+    "pdfkit": "^0.19.1",
+    "qrcode": "^1.5.3",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

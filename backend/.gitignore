@@ -1,0 +1,31 @@
+# Dependencias Node.js
+node_modules/
+
+# Variables de entorno — nunca al repositorio
+.env
+**/.env
+
+# Entorno virtual Python
+ai-service/venv/
+.venv/
+
+# Logs
+*.log
+logs/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Build
+dist/
+build/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
