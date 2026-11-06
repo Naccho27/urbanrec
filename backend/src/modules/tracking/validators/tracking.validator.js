@@ -16,9 +16,6 @@ const createExecutionRules = [
     .optional()
     .isDate().withMessage('Fecha inválida (YYYY-MM-DD)'),
 
-  body('zones_total')
-    .optional()
-    .isInt({ min: 0 })
 ]
 
 const gpsPointRules = [
@@ -77,6 +74,83 @@ const syncQueueRules = [
 const idParamRules = [
   param('id').isInt({ min: 1 }).withMessage('ID inválido')
 ]
+
+// Verifica que el usuario tenga acceso a una ejecución concreta.
+// Admin y municipal tienen acceso global.
+// El operador empresa solo accede a ejecuciones de su propia empresa.
+// El conductor solo accede a las ejecuciones que tiene asignadas.
+//
+// Sin esta verificación, cualquier operador podía pedir una ejecución
+// por ID y recibir datos de otra empresa prestadora (IDOR).
+const assertExecutionAccess = (execution, requestingUser) => {
+  if ([ROLES.ADMIN, ROLES.MUNICIPAL].includes(requestingUser.role)) return
+
+  if (requestingUser.role === ROLES.OPERATOR_COMPANY) {
+    if (execution.company_id !== requestingUser.company_id) {
+      throw Object.assign(
+        new Error('No tiene acceso a esta ejecución'),
+        { statusCode: 403 }
+      )
+    }
+    return
+  }
+
+  if (requestingUser.role === ROLES.CONDUCTOR) {
+    if (execution.conductor_id !== requestingUser.id) {
+      throw Object.assign(
+        new Error('No tiene acceso a esta ejecución'),
+        { statusCode: 403 }
+      )
+    }
+    return
+  }
+
+  throw Object.assign(new Error('Sin permisos'), { statusCode: 403 })
+}
+
+// Listado de ejecuciones con el filtro de empresa forzado por rol.
+// El company_id del query param se ignora para operador empresa y
+// conductor: el filtro lo impone el servidor, no el cliente.
+const getExecutions = async (filters, requestingUser) => {
+  if (requestingUser.role === ROLES.OPERATOR_COMPANY) {
+    filters.company_id = requestingUser.company_id
+  }
+  if (requestingUser.role === ROLES.CONDUCTOR) {
+    filters.company_id   = requestingUser.company_id
+    filters.conductor_id = requestingUser.id
+  }
+  return trackingModel.findExecutions(filters)
+}
+
+// Detalle de una ejecución, validando acceso por rol
+const getExecutionById = async (id, requestingUser) => {
+  const execution = await trackingModel.findExecutionById(id)
+  if (!execution) {
+    throw Object.assign(new Error('Ejecución no encontrada'), { statusCode: 404 })
+  }
+  assertExecutionAccess(execution, requestingUser)
+  return execution
+}
+
+// Historial GPS de una ejecución, validando acceso por rol
+const getGpsHistory = async (executionId, requestingUser) => {
+  const execution = await trackingModel.findExecutionById(executionId)
+  if (!execution) {
+    throw Object.assign(new Error('Ejecución no encontrada'), { statusCode: 404 })
+  }
+  assertExecutionAccess(execution, requestingUser)
+  return trackingModel.getGpsHistory(executionId)
+}
+
+// Zonas visitadas en una ejecución, validando acceso por rol
+const getZoneVisits = async (executionId, requestingUser) => {
+  const execution = await trackingModel.findExecutionById(executionId)
+  if (!execution) {
+    throw Object.assign(new Error('Ejecución no encontrada'), { statusCode: 404 })
+  }
+  assertExecutionAccess(execution, requestingUser)
+  return trackingModel.findZoneVisits(executionId)
+}
 
 module.exports = {
   createExecutionRules,

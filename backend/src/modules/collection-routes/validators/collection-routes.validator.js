@@ -12,9 +12,18 @@ const createRouteRules = [
     .optional()
     .trim(),
 
-  body('zone_id')
-    .notEmpty().withMessage('La zona es requerida')
-    .isInt({ min: 1 }).withMessage('zone_id inválido'),
+    body('zone_ids')
+    .notEmpty().withMessage('Las zonas del recorrido son requeridas')
+    .isArray({ min: 1 }).withMessage('zone_ids debe ser un array con al menos una zona')
+    .custom((arr) => {
+      if (arr.some(id => !Number.isInteger(id) || id < 1)) {
+        throw new Error('Cada zone_id debe ser un entero positivo')
+      }
+      if (new Set(arr).size !== arr.length) {
+        throw new Error('No se puede repetir la misma zona en un recorrido')
+      }
+      return true
+    }),
 
   body('waste_type_id')
     .notEmpty().withMessage('El tipo de residuo es requerido')
@@ -59,10 +68,19 @@ const updateRouteRules = [
     .optional()
     .trim(),
 
-  body('zone_id')
+   body('zone_ids')
     .optional()
-    .isInt({ min: 1 }),
-
+    .isArray({ min: 1 }).withMessage('zone_ids debe tener al menos una zona')
+    .custom((arr) => {
+      if (arr.some(id => !Number.isInteger(id) || id < 1)) {
+        throw new Error('Cada zone_id debe ser un entero positivo')
+      }
+      if (new Set(arr).size !== arr.length) {
+        throw new Error('No se puede repetir la misma zona en un recorrido')
+      }
+      return true
+    }),
+    
   body('waste_type_id')
     .optional()
     .isInt({ min: 1 }),

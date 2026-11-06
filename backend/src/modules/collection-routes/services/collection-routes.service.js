@@ -36,12 +36,20 @@ const getById = async (id, requestingUser) => {
 }
 
 const create = async (data, requestingUser) => {
-  // Verificar que la zona existe
-  const zone = await zoneModel.findById(data.zone_id)
-  if (!zone || !zone.is_active) {
-    const err = new Error('La zona no existe o está inactiva')
+  // Verificar que las zonas existen y están activas
+  if (!data.zone_ids || data.zone_ids.length === 0) {
+    const err = new Error('El recorrido debe cubrir al menos una zona')
     err.statusCode = 400
     throw err
+  }
+
+  for (const zId of data.zone_ids) {
+    const zone = await zoneModel.findById(zId)
+    if (!zone || !zone.is_active) {
+      const err = new Error(`La zona con ID ${zId} no existe o está inactiva`)
+      err.statusCode = 400
+      throw err
+    }
   }
 
   // Si viene company_id verificar que la empresa existe
@@ -58,6 +66,9 @@ const create = async (data, requestingUser) => {
     ...data,
     created_by: requestingUser.id
   })
+
+  // El orden del array define el orden de visita de las zonas
+  await routeModel.setZones(id, data.zone_ids)
 
   return routeModel.findById(id)
 }
@@ -78,6 +89,17 @@ const update = async (id, data, requestingUser) => {
   }
 
   await routeModel.update(id, data)
+
+  // Actualizar zonas si vienen — el orden del array es el orden de visita
+  if (data.zone_ids !== undefined) {
+    if (data.zone_ids.length === 0) {
+      const err = new Error('El recorrido debe cubrir al menos una zona')
+      err.statusCode = 400
+      throw err
+    }
+    await routeModel.setZones(id, data.zone_ids)
+  }
+
   return routeModel.findById(id)
 }
 

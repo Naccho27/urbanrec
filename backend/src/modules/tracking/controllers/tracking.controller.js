@@ -14,15 +14,13 @@ const getExecutions = async (req, res) => {
     status:       req.query.status       || undefined,
     date:         req.query.date         || undefined
   }
-  const executions = await trackingModel.findExecutions(filters)
+  // El service fuerza el filtro de empresa según el rol del solicitante
+  const executions = await trackingService.getExecutions(filters, req.user)
   return ok(res, { executions, total: executions.length })
 }
 
 const getExecutionById = async (req, res) => {
-  const execution = await trackingModel.findExecutionById(req.params.id)
-  if (!execution) {
-    return ok(res, null, 'Ejecución no encontrada')
-  }
+  const execution = await trackingService.getExecutionById(req.params.id, req.user)
   return ok(res, { execution })
 }
 
@@ -71,14 +69,14 @@ const recordGps = async (req, res) => {
 }
 
 const getGpsHistory = async (req, res) => {
-  const points = await trackingModel.getGpsHistory(req.params.id)
+  const points = await trackingService.getGpsHistory(req.params.id, req.user)
   return ok(res, { points, total: points.length })
 }
 
 // ── Zone Visits ───────────────────────────────────────────
 
 const getZoneVisits = async (req, res) => {
-  const visits = await trackingModel.findZoneVisits(req.params.id)
+  const visits = await trackingService.getZoneVisits(req.params.id, req.user)
   return ok(res, { visits, total: visits.length })
 }
 
