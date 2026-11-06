@@ -20,11 +20,15 @@ const optimizeRoute = async (collection_route_id, requestingUserId) => {
   const [routeRows] = await pool.execute(
     `SELECT
       cr.id, cr.name, cr.geojson, cr.distance_km, cr.duration_min,
-      cr.zone_id, cr.waste_type_id,
-      z.name AS zone_name, z.center_lat, z.center_lng, z.geojson AS zone_geojson
+      cr.waste_type_id,
+      COUNT(rz.zone_id) AS zones_count,
+      AVG(z.center_lat) AS avg_lat,
+      AVG(z.center_lng) AS avg_lng
      FROM collection_routes cr
-     LEFT JOIN zones z ON z.id = cr.zone_id
-     WHERE cr.id = ? AND cr.is_active = TRUE`,
+     LEFT JOIN route_zones rz ON rz.collection_route_id = cr.id
+     LEFT JOIN zones z        ON z.id = rz.zone_id
+     WHERE cr.id = ? AND cr.is_active = TRUE
+     GROUP BY cr.id`,
     [collection_route_id]
   )
 
@@ -49,7 +53,7 @@ const optimizeRoute = async (collection_route_id, requestingUserId) => {
     [collection_route_id]
   )
 
-  const input_data = {
+    const input_data = {
     route: {
       id:           route.id,
       name:         route.name,
@@ -58,10 +62,10 @@ const optimizeRoute = async (collection_route_id, requestingUserId) => {
       duration_min: route.duration_min
     },
     zone: {
-      name:       route.zone_name,
-      center_lat: parseFloat(route.center_lat),
-      center_lng: parseFloat(route.center_lng),
-      geojson:    route.zone_geojson
+      name:       `${route.zones_count} zonas`,
+      center_lat: parseFloat(route.avg_lat),
+      center_lng: parseFloat(route.avg_lng),
+      geojson:    null
     },
     historical: execRows[0]
   }
@@ -113,24 +117,41 @@ const predictDemand = async (zone_id, requestingUserId) => {
   }
 
   // Historial de ejecuciones por día de la semana
-  // Reemplazar la query del historial por esta:
-const [histRows] = await pool.execute(
-  `SELECT
-    DAYOFWEEK(re.execution_date)  AS day_of_week,
-    s.shift,
-    AVG(re.completion_pct)        AS avg_completion,
-    COUNT(*)                      AS executions,
-    COUNT(i.id)                   AS incidents
-   FROM route_executions re
-   LEFT JOIN collection_routes cr ON cr.id = re.collection_route_id
-   LEFT JOIN schedules s          ON s.collection_route_id = cr.id
-   LEFT JOIN incidents i          ON i.execution_id = re.id
-   WHERE cr.zone_id = ?
-   AND re.execution_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
-   GROUP BY DAYOFWEEK(re.execution_date), s.shift
-   ORDER BY day_of_week ASC`,
-  [zone_id]
-)
+  // Se mide sobre ESTE barrio, no sobre el recorrido completo:
+  //   - avg_completion: % de salidas en las que el barrio se recolectó
+  //     (zone_visits). Un recorrido puede terminar al 92% y que justo
+  //     este barrio sea el que quedó sin recolectar.
+  //   - incidents: solo los incidentes ocurridos en este barrio.
+  // Visitas e incidentes se calculan en subconsultas: si se unieran con
+  // LEFT JOIN, cada ejecución se repetiría una vez por incidente e
+  // inflaría los conteos y promedios.
+  // El cronograma se une por re.schedule_id (el que se ejecutó), no por
+  // recorrido: si un recorrido tuviera dos cronogramas, se duplicaría.
+  // avg_duration_min: duración real; es la mejor señal del volumen de
+  // residuos (lo usará la próxima versión del modelo de predicción).
+  const [histRows] = await pool.execute(
+    `SELECT
+      DAYOFWEEK(re.execution_date)  AS day_of_week,
+      s.shift,
+      AVG(CASE WHEN zv.execution_id IS NULL THEN 0 ELSE 100 END) AS avg_completion,
+      COUNT(*)                      AS executions,
+      COALESCE(SUM(inc.total), 0)   AS incidents,
+      AVG(TIMESTAMPDIFF(MINUTE, re.started_at, re.completed_at)) AS avg_duration_min
+     FROM route_executions re
+     INNER JOIN route_zones rz      ON rz.collection_route_id = re.collection_route_id
+                                   AND rz.zone_id = ?
+     INNER JOIN schedules s         ON s.id = re.schedule_id
+     LEFT JOIN (SELECT DISTINCT execution_id FROM zone_visits WHERE zone_id = ?) zv
+                                    ON zv.execution_id = re.id
+     LEFT JOIN (SELECT execution_id, COUNT(*) AS total FROM incidents
+                WHERE zone_id = ? GROUP BY execution_id) inc
+                                    ON inc.execution_id = re.id
+     WHERE re.execution_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+     AND re.status IN ('completed', 'with_issues', 'cancelled')
+     GROUP BY DAYOFWEEK(re.execution_date), s.shift
+     ORDER BY day_of_week ASC`,
+    [zone_id, zone_id, zone_id]
+  )
   const input_data = {
     zone: zoneRows[0],
     historical_by_day: histRows,
