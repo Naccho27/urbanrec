@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "compression": "^1.8.1",
-    "express-rate-limit": "^8.6.2"
-  }
-}
