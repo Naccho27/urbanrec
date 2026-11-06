@@ -100,3 +100,13 @@ INSERT INTO system_settings (`key`, value, type, description) VALUES
     'number',
     'Horas máximas que un registro offline puede estar en la cola antes de descartarse. Un turno dura máximo 8 horas, así que 24 horas cubre cualquier escenario normal de pérdida de señal'
   );
+
+INSERT INTO system_settings (`key`, value, type, description) VALUES
+(
+  'session_inactivity_timeout_min',
+  '30',
+  'number',
+  'Minutos de inactividad antes de cerrar la sesión automáticamente. Los conductores quedan exentos mientras tengan un recorrido en curso con GPS activo, ya que cada punto GPS cuenta como actividad'
+) AS nuevo
+ON DUPLICATE KEY UPDATE
+  description = nuevo.description;

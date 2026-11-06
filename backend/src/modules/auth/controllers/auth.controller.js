@@ -46,9 +46,18 @@ const login = async (req, res) => {
     return fail(res, 'Credenciales inválidas', 401)
   }
 
+  // Si tiene TOTP activo → respuesta intermedia
+  // Emite un token temporal que habilita el paso 2 del login
+  // Sin este token, /2fa/verify-login rechaza el request
   if (user.totp_enabled) {
     await authModel.registerLoginAttempt({ email, success: false, ip, user_agent })
-    return ok(res, { requiresTOTP: true, userId: user.id }, 'Se requiere código de autenticación', 200)
+
+    const pendingToken = authService.signPendingToken(user.id)
+
+    return ok(res, {
+      requiresTOTP: true,
+      pendingToken
+    }, 'Se requiere código de autenticación', 200)
   }
 
   if (user.role === ROLES.ADMIN && !user.totp_enabled) {
@@ -64,7 +73,11 @@ const login = async (req, res) => {
 
   await authModel.registerLoginAttempt({ email, success: true, ip, user_agent })
 
-  return ok(res, {
+   return ok(res, {
+    // En desarrollo devolvemos el token también en el body
+    // para poder probarlo en Postman con Bearer.
+    // En producción el frontend usa la cookie directamente.
+    ...(process.env.NODE_ENV === 'development' && { accessToken }),
     user: {
       id:         user.id,
       name:       user.name,
@@ -76,10 +89,31 @@ const login = async (req, res) => {
 }
 
 // ── Verificar TOTP durante el login ──────────────────────
+// Paso 2 del login. Requiere el pendingToken emitido en el paso 1,
+// lo que garantiza que el usuario ya validó email y contraseña.
 const verifyTOTPLogin = async (req, res) => {
-  const { userId, token } = req.body
+  const { pendingToken, token } = req.body
   const ip         = req.ip
   const user_agent = req.headers['user-agent']
+
+  // Verificar el token temporal del paso 1
+  let decoded
+  try {
+    decoded = authService.verifyToken(pendingToken)
+  } catch (jwtErr) {
+    if (jwtErr.name === 'TokenExpiredError') {
+      return fail(res, 'La sesión de autenticación expiró. Inicie sesión nuevamente', 401)
+    }
+    return fail(res, 'Token de sesión inválido', 401)
+  }
+
+  // Verificar que el token sea específicamente para completar el 2FA
+  // Impide usar un accessToken normal para saltarse el paso de contraseña
+  if (decoded.purpose !== 'totp_pending') {
+    return fail(res, 'Token inválido para esta operación', 401)
+  }
+
+  const userId = decoded.id
 
   const [rows] = await pool.execute(
     'SELECT id, name, email, role, company_id, totp_secret, totp_enabled, is_active FROM users WHERE id = ? LIMIT 1',
@@ -105,12 +139,12 @@ const verifyTOTPLogin = async (req, res) => {
   const accessToken  = authService.signToken(payload)
   const refreshToken = authService.signRefreshToken(payload)
 
-  // Setear cookies httpOnly
   setAuthCookies(res, accessToken, refreshToken)
 
   await authModel.registerLoginAttempt({ email: user.email, success: true, ip, user_agent })
 
   return ok(res, {
+    ...(process.env.NODE_ENV === 'development' && { accessToken }),
     user: {
       id:         user.id,
       name:       user.name,
@@ -157,6 +191,10 @@ const refreshToken = async (req, res) => {
 
 // ── Logout ────────────────────────────────────────────────
 const logout = async (req, res) => {
+  // Limpiar el registro de actividad para invalidar la sesión
+  const cache = require('../../../shared/services/cache.service')
+  await cache.del(`activity:${req.user.id}`)
+
   res.clearCookie('accessToken')
   res.clearCookie('refreshToken')
   return ok(res, null, 'Sesión cerrada correctamente')

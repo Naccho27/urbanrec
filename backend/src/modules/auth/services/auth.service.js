@@ -48,11 +48,23 @@ const buildTokenPayload = (user) => ({
   company_id: user.company_id || null
 })
 
+// Token temporal entre el paso 1 y 2 del login con 2FA
+// Corta duración (5 min) y payload mínimo — solo habilita completar el TOTP
+// El campo 'purpose' evita que un accessToken normal se use para saltarse el paso 1
+const signPendingToken = (userId) => {
+  return jwt.sign(
+    { id: userId, purpose: 'totp_pending' },
+    jwtConfig.secret,
+    { expiresIn: '5m' }
+  )
+}
+
 module.exports = {
   hashPassword,
   comparePassword,
   signToken,
   signRefreshToken,
+  signPendingToken,
   verifyToken,
   buildTokenPayload
 }

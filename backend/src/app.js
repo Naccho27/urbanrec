@@ -40,6 +40,10 @@ app.use(helmet({
   referrerPolicy: { policy: 'same-origin' }
 }))
 
+// Agregar después de app.use(helmet())
+// Le dice a Express que confíe en el proxy (Nginx) para obtener la IP real
+app.set('trust proxy', 1)
+
 // ── CORS ──────────────────────────────────────────────────
 app.use(cors({
   origin:      client.url,

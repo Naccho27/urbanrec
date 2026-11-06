@@ -2,16 +2,34 @@
 
 const zoneModel      = require('../models/zone.model')
 const wasteTypeModel = require('../../waste-types/models/waste-type.model')
+const cache          = require('../../../shared/services/cache.service')
 const { calculateCentroid, geocodeAddress } = require('../../../shared/utils/geo')
 const { ROLES } = require('../../../shared/utils/roles')
 const auditService = require('../../audit/services/audit.service')
 
+// TTL de zonas: 1 hora
+// Las zonas cambian muy poco — el municipio las define y rara vez las modifica
+const ZONES_TTL = 3600
+
 const getAll = async (filters) => {
-  return zoneModel.findAll(filters)
+  // Clave de caché según los filtros aplicados
+  const cacheKey = filters.is_active !== undefined
+    ? `${cache.KEYS.ZONES}:active:${filters.is_active}`
+    : `${cache.KEYS.ZONES}:all`
+
+  // remember: si está en caché lo devuelve, si no ejecuta la query y cachea
+  return cache.remember(cacheKey, ZONES_TTL, async () => {
+    return zoneModel.findAll(filters)
+  })
 }
 
 const getById = async (id) => {
-  const zone = await zoneModel.findById(id)
+  const cacheKey = `${cache.KEYS.ZONE}:${id}`
+
+  const zone = await cache.remember(cacheKey, ZONES_TTL, async () => {
+    return zoneModel.findById(id)
+  })
+
   if (!zone) {
     const err = new Error('Zona no encontrada')
     err.statusCode = 404
@@ -22,6 +40,7 @@ const getById = async (id) => {
 
 // Busca zonas cercanas a una dirección
 // Usado por ciudadanos para saber qué zona les corresponde
+// No se cachea porque cada dirección buscada es distinta
 const findByAddress = async (address) => {
   const coords = await geocodeAddress(address)
   if (!coords) {
@@ -73,13 +92,16 @@ const create = async (data, requestingUser) => {
     await zoneModel.setWasteTypes(zoneId, data.waste_type_ids)
   }
 
+  // Invalidar caché de zonas — hay una zona nueva que debe aparecer en los listados
+  await cache.invalidatePattern(`${cache.KEYS.ZONES}:*`)
+
   await auditService.record({
-  requestingUser,
-  action:    auditService.ACTIONS.CREATE,
-  entity:    auditService.ENTITIES.ZONE,
-  entity_id: zoneId,
-  new_values: { name: data.name, waste_type_ids: data.waste_type_ids }
-})
+    requestingUser,
+    action:    auditService.ACTIONS.CREATE,
+    entity:    auditService.ENTITIES.ZONE,
+    entity_id: zoneId,
+    new_values: { name: data.name, waste_type_ids: data.waste_type_ids }
+  })
 
   return zoneModel.findById(zoneId)
 }
@@ -106,13 +128,17 @@ const update = async (id, data, requestingUser) => {
     await zoneModel.setWasteTypes(id, data.waste_type_ids)
   }
 
+  // Invalidar caché — la zona cambió y el listado debe reflejarlo
+  await cache.invalidatePattern(`${cache.KEYS.ZONES}:*`)
+  await cache.del(`${cache.KEYS.ZONE}:${id}`)
+
   await auditService.record({
-  requestingUser,
-  action:    auditService.ACTIONS.UPDATE,
-  entity:    auditService.ENTITIES.ZONE,
-  entity_id: parseInt(id),
-  new_values: data
-})
+    requestingUser,
+    action:    auditService.ACTIONS.UPDATE,
+    entity:    auditService.ENTITIES.ZONE,
+    entity_id: parseInt(id),
+    new_values: data
+  })
 
   return zoneModel.findById(id)
 }
@@ -126,12 +152,16 @@ const remove = async (id) => {
   }
   await zoneModel.remove(id)
 
+  // Invalidar caché — la zona desactivada no debe aparecer en listados activos
+  await cache.invalidatePattern(`${cache.KEYS.ZONES}:*`)
+  await cache.del(`${cache.KEYS.ZONE}:${id}`)
+
   await auditService.record({
-  requestingUser,
-  action:    auditService.ACTIONS.SOFT_DELETE,
-  entity:    auditService.ENTITIES.ZONE,
-  entity_id: parseInt(id)
-})
+    requestingUser,
+    action:    auditService.ACTIONS.SOFT_DELETE,
+    entity:    auditService.ENTITIES.ZONE,
+    entity_id: parseInt(id)
+  })
 
   return { message: 'Zona desactivada correctamente' }
 }

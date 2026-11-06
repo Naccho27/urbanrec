@@ -1,13 +1,31 @@
 'use strict'
 
 const wasteTypeModel = require('../models/waste-type.model')
+const cache          = require('../../../shared/services/cache.service')
+
+// TTL de tipos de residuo: 2 horas
+// Casi nunca cambian — son 4 tipos fijos que el municipio definió
+const WASTE_TYPES_TTL = 7200
 
 const getAll = async (filters) => {
-  return wasteTypeModel.findAll(filters)
+  // Clave de caché según los filtros aplicados
+  const cacheKey = filters.is_active !== undefined
+    ? `${cache.KEYS.WASTE_TYPES}:active:${filters.is_active}`
+    : `${cache.KEYS.WASTE_TYPES}:all`
+
+  // remember: si está en caché lo devuelve, si no ejecuta la query y cachea
+  return cache.remember(cacheKey, WASTE_TYPES_TTL, async () => {
+    return wasteTypeModel.findAll(filters)
+  })
 }
 
 const getById = async (id) => {
-  const wt = await wasteTypeModel.findById(id)
+  const cacheKey = `${cache.KEYS.WASTE_TYPES}:${id}`
+
+  const wt = await cache.remember(cacheKey, WASTE_TYPES_TTL, async () => {
+    return wasteTypeModel.findById(id)
+  })
+
   if (!wt) {
     const err = new Error('Tipo de residuo no encontrado')
     err.statusCode = 404
@@ -25,6 +43,10 @@ const create = async (data) => {
     throw err
   }
   const id = await wasteTypeModel.create(data)
+
+  // Invalidar caché — hay un tipo nuevo que debe aparecer en los listados
+  await cache.invalidatePattern(`${cache.KEYS.WASTE_TYPES}:*`)
+
   return wasteTypeModel.findById(id)
 }
 
@@ -47,6 +69,10 @@ const update = async (id, data) => {
   }
 
   await wasteTypeModel.update(id, data)
+
+  // Invalidar caché — el tipo cambió y los listados deben reflejarlo
+  await cache.invalidatePattern(`${cache.KEYS.WASTE_TYPES}:*`)
+
   return wasteTypeModel.findById(id)
 }
 
@@ -58,6 +84,10 @@ const remove = async (id) => {
     throw err
   }
   await wasteTypeModel.remove(id)
+
+  // Invalidar caché — el tipo desactivado no debe aparecer en listados activos
+  await cache.invalidatePattern(`${cache.KEYS.WASTE_TYPES}:*`)
+
   return { message: 'Tipo de residuo desactivado correctamente' }
 }
 

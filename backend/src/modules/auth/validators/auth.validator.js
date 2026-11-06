@@ -15,11 +15,10 @@ const loginRules = [
     .isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres')
 ]
 
-// Reglas para POST /auth/2fa/verify (durante el login)
+// Reglas para POST /auth/2fa/verify-login (paso 2 del login)
 const verifyTOTPLoginRules = [
-  body('userId')
-    .notEmpty().withMessage('El ID de usuario es requerido')
-    .isInt({ min: 1 }).withMessage('ID inválido'),
+  body('pendingToken')
+    .notEmpty().withMessage('Token de sesión requerido'),
 
   body('token')
     .notEmpty().withMessage('El código TOTP es requerido')
