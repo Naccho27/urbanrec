@@ -7,6 +7,8 @@ const zoneModel       = require('../../zones/models/zone.model')
 const socketService   = require('../../notifications/services/socket.service')
 const notifService    = require('../../notifications/services/notifications.service')
 const settingsService = require('../../settings/services/settings.service')
+const userModel       = require('../../users/models/user.model')
+const auditService    = require('../../audit/services/audit.service')
 const { haversineDistance } = require('../../../shared/utils/geo')
 const { EXECUTION_STATUS }  = require('../../../shared/utils/constants')
 const { ROLES }             = require('../../../shared/utils/roles')
@@ -41,6 +43,25 @@ const createExecution = async (data, requestingUser) => {
   // de zonas que cubre el recorrido según route_zones.
   const routeZones = await routeModel.getZones(schedule.collection_route_id)
 
+  // El conductor asignado tiene que ser un conductor activo de la misma
+  // empresa que presta el servicio. Sin este control, un operador podía
+  // asignar a un conductor de otra empresa (o a un usuario que no es
+  // conductor) y ese usuario pasaba a ver la ejecución y su GPS.
+  if (data.conductor_id) {
+    const conductor = await userModel.findById(data.conductor_id)
+    if (
+      !conductor ||
+      conductor.role !== ROLES.CONDUCTOR ||
+      !conductor.is_active ||
+      conductor.company_id !== schedule.company_id
+    ) {
+      throw Object.assign(
+        new Error('El conductor no existe, está inactivo o no pertenece a la empresa del cronograma'),
+        { statusCode: 400 }
+      )
+    }
+  }
+
   const id = await trackingModel.createExecution({
     schedule_id:         data.schedule_id,
     collection_route_id: schedule.collection_route_id,
@@ -48,6 +69,20 @@ const createExecution = async (data, requestingUser) => {
     conductor_id:        data.conductor_id || null,
     execution_date:      data.execution_date || new Date().toISOString().split('T')[0],
     zones_total:         routeZones.length
+  })
+
+  // Asignación de conductor: es la acción principal del operador de
+  // empresa y el documento exige que quede registrada
+  await auditService.record({
+    requestingUser,
+    action:     auditService.ACTIONS.CREATE,
+    entity:     auditService.ENTITIES.EXECUTION,
+    entity_id:  id,
+    new_values: {
+      schedule_id:    data.schedule_id,
+      conductor_id:   data.conductor_id || null,
+      execution_date: data.execution_date || null
+    }
   })
 
   return trackingModel.findExecutionById(id)
@@ -342,6 +377,17 @@ const confirmZoneManually = async (executionId, zoneId, conductorId, notes = nul
     throw Object.assign(new Error('Sin acceso'), { statusCode: 403 })
   }
 
+  // Solo se confirma a mano durante el recorrido y solo barrios que el
+  // recorrido cubre: si no, se podía inflar la cobertura confirmando
+  // barrios ajenos o una ejecución ya cerrada
+  if (!['in_progress', 'paused'].includes(execution.status)) {
+    throw Object.assign(new Error('Solo se pueden confirmar zonas de un recorrido en curso'), { statusCode: 400 })
+  }
+  const routeZones = await routeModel.getZones(execution.collection_route_id)
+  if (!routeZones.some(z => z.id === Number(zoneId))) {
+    throw Object.assign(new Error('La zona no pertenece a este recorrido'), { statusCode: 400 })
+  }
+
   const alreadyVisited = await trackingModel.zoneAlreadyVisited(executionId, zoneId)
   if (alreadyVisited) {
     throw Object.assign(new Error('La zona ya fue confirmada'), { statusCode: 400 })
@@ -352,6 +398,16 @@ const confirmZoneManually = async (executionId, zoneId, conductorId, notes = nul
     zone_id:      zoneId,
     method:       'manual',
     notes
+  })
+
+  // La confirmación manual reemplaza la del GPS: queda auditada para
+  // que el municipio pueda revisar si se usa de más
+  await auditService.record({
+    requestingUser: { id: conductorId, role: ROLES.CONDUCTOR, company_id: execution.company_id },
+    action:     auditService.ACTIONS.UPDATE,
+    entity:     auditService.ENTITIES.EXECUTION,
+    entity_id:  parseInt(executionId),
+    new_values: { zone_id: Number(zoneId), method: 'manual', notes }
   })
 
   const visits = await trackingModel.findZoneVisits(executionId)

@@ -68,14 +68,17 @@ const generateQR = async (secret, userEmail) => {
 const verifyTotpToken = (encryptedSecret, token) => {
   try {
     const secret = decryptSecret(encryptedSecret)
-    
-    // Ver qué código espera el servidor ahora mismo
-    const expectedToken = authenticator.generate(secret)
-    console.log('Secret:', secret)
-    console.log('Token recibido:', token)
-    console.log('Token esperado por el servidor:', expectedToken)
-    console.log('Hora del servidor:', new Date().toISOString())
-    
+
+    // Depuración: solo en desarrollo. Muestra el código recibido, el que
+    // espera el servidor y la hora, para detectar desfasajes de reloj.
+    // El secret NO se imprime: con él cualquiera puede generar códigos
+    // válidos para siempre (los códigos, en cambio, vencen en 30 s).
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Token recibido:', token)
+      console.log('Token esperado por el servidor:', authenticator.generate(secret))
+      console.log('Hora del servidor:', new Date().toISOString())
+    }
+
     return authenticator.verify({ token, secret })
   } catch (err) {
     console.log('Error:', err.message)

@@ -36,7 +36,7 @@ const deactivate = async (req, res) => {
 }
 
 const activate = async (req, res) => {
-  const user = await usersService.activate(req.params.id)
+  const user = await usersService.activate(req.params.id, req.user)
   return ok(res, { user }, 'Usuario reactivado correctamente')
 }
 

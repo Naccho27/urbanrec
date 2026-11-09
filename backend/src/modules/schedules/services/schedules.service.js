@@ -5,6 +5,14 @@ const routeModel    = require('../../collection-routes/models/collection-route.m
 const companyModel  = require('../../users/models/company.model')
 const { ROLES }     = require('../../../shared/utils/roles')
 const { SHIFT }     = require('../../../shared/utils/constants')
+const cache         = require('../../../shared/services/cache.service')
+const auditService  = require('../../audit/services/audit.service')
+
+// Los horarios públicos por barrio (GET /public/schedules) se cachean en
+// Redis. Cualquier cambio en cronogramas borra ese caché para que el
+// ciudadano nunca vea un horario viejo.
+const invalidatePublicSchedules = () =>
+  cache.invalidatePattern(`${cache.KEYS.SCHEDULES}:*`)
 
 const getAll = async (filters, requestingUser) => {
   // Operador empresa solo ve sus cronogramas
@@ -96,6 +104,16 @@ const create = async (data, requestingUser) => {
     created_by: requestingUser.id
   })
 
+  await invalidatePublicSchedules()
+
+  await auditService.record({
+    requestingUser,
+    action:     auditService.ACTIONS.CREATE,
+    entity:     auditService.ENTITIES.SCHEDULE,
+    entity_id:  id,
+    new_values: data
+  })
+
   return scheduleModel.findById(id)
 }
 
@@ -119,10 +137,23 @@ const update = async (id, data, requestingUser) => {
   }
 
   await scheduleModel.update(id, data)
+  await invalidatePublicSchedules()
+
+  // Se guardan los valores anteriores de lo que cambió: un cambio de
+  // días u horario afecta directamente a los vecinos
+  await auditService.record({
+    requestingUser,
+    action:     auditService.ACTIONS.UPDATE,
+    entity:     auditService.ENTITIES.SCHEDULE,
+    entity_id:  parseInt(id),
+    old_values: Object.fromEntries(Object.keys(data).map(k => [k, schedule[k]])),
+    new_values: data
+  })
+
   return scheduleModel.findById(id)
 }
 
-const remove = async (id) => {
+const remove = async (id, requestingUser) => {
   const schedule = await scheduleModel.findById(id)
   if (!schedule) {
     const err = new Error('Cronograma no encontrado')
@@ -130,6 +161,15 @@ const remove = async (id) => {
     throw err
   }
   await scheduleModel.remove(id)
+  await invalidatePublicSchedules()
+
+  await auditService.record({
+    requestingUser,
+    action:    auditService.ACTIONS.SOFT_DELETE,
+    entity:    auditService.ENTITIES.SCHEDULE,
+    entity_id: parseInt(id)
+  })
+
   return { message: 'Cronograma desactivado correctamente' }
 }
 

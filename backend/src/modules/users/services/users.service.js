@@ -115,6 +115,19 @@ const updateUser = async (id, data, requestingUser) => {
   new_values: data
 })
 
+  // El cambio de rol se registra además como acción propia: es lo que
+  // más interesa encontrar rápido en una revisión de seguridad
+  if (data.role && data.role !== user.role) {
+    await auditService.record({
+      requestingUser,
+      action:     auditService.ACTIONS.ROLE_CHANGED,
+      entity:     auditService.ENTITIES.USER,
+      entity_id:  parseInt(id),
+      old_values: { role: user.role },
+      new_values: { role: data.role }
+    })
+  }
+
   return userModel.findById(id)
 }
 
@@ -147,7 +160,7 @@ const deactivate = async (id, requestingUser) => {
 }
 
 // Reactiva un usuario
-const activate = async (id) => {
+const activate = async (id, requestingUser) => {
   const user = await userModel.findById(id)
   if (!user) {
     const err = new Error('Usuario no encontrado')
@@ -155,6 +168,14 @@ const activate = async (id) => {
     throw err
   }
   await userModel.reactivate(id)
+
+  await auditService.record({
+    requestingUser,
+    action:    auditService.ACTIONS.REACTIVATE,
+    entity:    auditService.ENTITIES.USER,
+    entity_id: parseInt(id)
+  })
+
   return userModel.findById(id)
 }
 

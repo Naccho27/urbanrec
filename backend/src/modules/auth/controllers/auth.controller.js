@@ -6,6 +6,21 @@ const totpService  = require('../services/totp.service')
 const pool         = require('../../../config/db')
 const { ok, fail } = require('../../../shared/utils/responses')
 const { ROLES }    = require('../../../shared/utils/roles')
+const auditService = require('../../audit/services/audit.service')
+
+// Registra en auditoría una acción de autenticación con IP y navegador.
+// user puede ser null (intento de login con un email que no existe).
+// En los intentos fallidos sobre una cuenta existente, user_id es la
+// cuenta atacada: así el admin puede filtrar "intentos contra mi usuario".
+const auditAuth = (req, user, action, new_values = null) =>
+  auditService.record({
+    requestingUser: user ? { id: user.id, role: user.role, company_id: user.company_id } : null,
+    action,
+    entity:    auditService.ENTITIES.USER,
+    entity_id: user?.id ?? null,
+    new_values,
+    ...auditService.fromRequest(req)
+  })
 
 // Helper para setear las cookies de auth
 // Se reutiliza en login y verifyTOTPLogin
@@ -37,12 +52,15 @@ const login = async (req, res) => {
 
   if (!user || !user.is_active || user.deleted_at) {
     await authModel.registerLoginAttempt({ email, success: false, ip, user_agent })
+    await auditAuth(req, user && user.is_active ? user : null, auditService.ACTIONS.LOGIN_FAILED,
+      { email, reason: user ? 'cuenta inactiva' : 'email inexistente' })
     return fail(res, 'Credenciales inválidas', 401)
   }
 
   const passwordOk = await authService.comparePassword(password, user.password_hash)
   if (!passwordOk) {
     await authModel.registerLoginAttempt({ email, success: false, ip, user_agent })
+    await auditAuth(req, user, auditService.ACTIONS.LOGIN_FAILED, { email, reason: 'contraseña incorrecta' })
     return fail(res, 'Credenciales inválidas', 401)
   }
 
@@ -72,6 +90,7 @@ const login = async (req, res) => {
   setAuthCookies(res, accessToken, refreshToken)
 
   await authModel.registerLoginAttempt({ email, success: true, ip, user_agent })
+  await auditAuth(req, user, auditService.ACTIONS.LOGIN, { method: 'contraseña' })
 
    return ok(res, {
     // En desarrollo devolvemos el token también en el body
@@ -132,6 +151,7 @@ const verifyTOTPLogin = async (req, res) => {
   const valid = totpService.verifyTotpToken(user.totp_secret, token)
   if (!valid) {
     await authModel.registerLoginAttempt({ email: user.email, success: false, ip, user_agent })
+    await auditAuth(req, user, auditService.ACTIONS.LOGIN_FAILED, { email: user.email, reason: 'código TOTP inválido' })
     return fail(res, 'Código de autenticación inválido o expirado', 401)
   }
 
@@ -142,6 +162,7 @@ const verifyTOTPLogin = async (req, res) => {
   setAuthCookies(res, accessToken, refreshToken)
 
   await authModel.registerLoginAttempt({ email: user.email, success: true, ip, user_agent })
+  await auditAuth(req, user, auditService.ACTIONS.LOGIN, { method: 'contraseña + TOTP' })
 
   return ok(res, {
     ...(process.env.NODE_ENV === 'development' && { accessToken }),
@@ -194,6 +215,7 @@ const logout = async (req, res) => {
   // Limpiar el registro de actividad para invalidar la sesión
   const cache = require('../../../shared/services/cache.service')
   await cache.del(`activity:${req.user.id}`)
+  await auditAuth(req, req.user, auditService.ACTIONS.LOGOUT)
 
   res.clearCookie('accessToken')
   res.clearCookie('refreshToken')
@@ -213,6 +235,10 @@ const setupTOTP = async (req, res) => {
     'UPDATE users SET totp_secret = ? WHERE id = ?',
     [encryptedSecret, userId]
   )
+
+  // Generar un secret nuevo invalida el autenticador anterior: se audita
+  // (sin guardar el secret, solo el hecho)
+  await auditAuth(req, req.user, auditService.ACTIONS.UPDATE, { totp_secret: 'regenerado' })
 
   return ok(res, { qrCode, manualCode: secret },
     'QR generado. Escanee con Google Authenticator o Authy y confirme con un código')
@@ -242,6 +268,8 @@ const enableTOTP = async (req, res) => {
     'UPDATE users SET totp_enabled = TRUE WHERE id = ?',
     [userId]
   )
+
+  await auditAuth(req, req.user, auditService.ACTIONS.TOTP_ENABLED)
 
   return ok(res, null, 'Autenticación de dos factores activada correctamente')
 }
@@ -279,6 +307,8 @@ const disableTOTP = async (req, res) => {
     'UPDATE users SET totp_enabled = FALSE, totp_secret = NULL WHERE id = ?',
     [userId]
   )
+
+  await auditAuth(req, req.user, auditService.ACTIONS.TOTP_DISABLED)
 
   return ok(res, null, 'Autenticación de dos factores desactivada')
 }
@@ -355,6 +385,8 @@ const initialEnableTOTP = async (req, res) => {
     'UPDATE users SET totp_enabled = TRUE WHERE id = ?',
     [user.id]
   )
+
+  await auditAuth(req, user, auditService.ACTIONS.TOTP_ENABLED, { primer_ingreso: true })
 
   return ok(res, null, 'TOTP activado correctamente. Ya puede hacer login completo.')
 }

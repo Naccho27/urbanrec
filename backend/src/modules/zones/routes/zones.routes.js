@@ -6,6 +6,7 @@ const validate      = require('../../../shared/middlewares/validate.middleware')
 const { verifyJWT } = require('../../auth/middlewares/auth.middleware')
 const { checkRole } = require('../../users/middlewares/roles.middleware')
 const { ROLES }     = require('../../../shared/utils/roles')
+const { publicLimiter } = require('../../../shared/middlewares/rateLimit.middleware')
 
 const controller = require('../controllers/zones.controller')
 const {
@@ -21,11 +22,13 @@ const router = Router()
 
 // GET /api/v1/zones — mapa público para ciudadanos
 router.get('/',
+  publicLimiter,
   asyncWrapper(controller.getAll)
 )
 
 // GET /api/v1/zones/search?address=... — búsqueda por dirección
 router.get('/search',
+  publicLimiter,
   addressQueryRules,
   validate,
   asyncWrapper(controller.findByAddress)
@@ -33,6 +36,7 @@ router.get('/search',
 
 // GET /api/v1/zones/:id — detalle de una zona
 router.get('/:id',
+  publicLimiter,
   idParamRules,
   validate,
   asyncWrapper(controller.getById)

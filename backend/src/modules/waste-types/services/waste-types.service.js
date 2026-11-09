@@ -2,6 +2,7 @@
 
 const wasteTypeModel = require('../models/waste-type.model')
 const cache          = require('../../../shared/services/cache.service')
+const auditService   = require('../../audit/services/audit.service')
 
 // TTL de tipos de residuo: 2 horas
 // Casi nunca cambian — son 4 tipos fijos que el municipio definió
@@ -34,7 +35,7 @@ const getById = async (id) => {
   return wt
 }
 
-const create = async (data) => {
+const create = async (data, requestingUser) => {
   // Verificar nombre duplicado
   const existing = await wasteTypeModel.findByName(data.name)
   if (existing) {
@@ -47,10 +48,18 @@ const create = async (data) => {
   // Invalidar caché — hay un tipo nuevo que debe aparecer en los listados
   await cache.invalidatePattern(`${cache.KEYS.WASTE_TYPES}:*`)
 
+  await auditService.record({
+    requestingUser,
+    action:     auditService.ACTIONS.CREATE,
+    entity:     auditService.ENTITIES.WASTE_TYPE,
+    entity_id:  id,
+    new_values: data
+  })
+
   return wasteTypeModel.findById(id)
 }
 
-const update = async (id, data) => {
+const update = async (id, data, requestingUser) => {
   const wt = await wasteTypeModel.findById(id)
   if (!wt) {
     const err = new Error('Tipo de residuo no encontrado')
@@ -73,10 +82,19 @@ const update = async (id, data) => {
   // Invalidar caché — el tipo cambió y los listados deben reflejarlo
   await cache.invalidatePattern(`${cache.KEYS.WASTE_TYPES}:*`)
 
+  await auditService.record({
+    requestingUser,
+    action:     auditService.ACTIONS.UPDATE,
+    entity:     auditService.ENTITIES.WASTE_TYPE,
+    entity_id:  parseInt(id),
+    old_values: Object.fromEntries(Object.keys(data).map(k => [k, wt[k]])),
+    new_values: data
+  })
+
   return wasteTypeModel.findById(id)
 }
 
-const remove = async (id) => {
+const remove = async (id, requestingUser) => {
   const wt = await wasteTypeModel.findById(id)
   if (!wt) {
     const err = new Error('Tipo de residuo no encontrado')
@@ -87,6 +105,13 @@ const remove = async (id) => {
 
   // Invalidar caché — el tipo desactivado no debe aparecer en listados activos
   await cache.invalidatePattern(`${cache.KEYS.WASTE_TYPES}:*`)
+
+  await auditService.record({
+    requestingUser,
+    action:    auditService.ACTIONS.SOFT_DELETE,
+    entity:    auditService.ENTITIES.WASTE_TYPE,
+    entity_id: parseInt(id)
+  })
 
   return { message: 'Tipo de residuo desactivado correctamente' }
 }

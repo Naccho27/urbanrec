@@ -143,7 +143,10 @@ const update = async (id, data, requestingUser) => {
   return zoneModel.findById(id)
 }
 
-const remove = async (id) => {
+// requestingUser faltaba en la firma: la zona se desactivaba, pero
+// auditService.record fallaba con "requestingUser is not defined",
+// el endpoint respondía 500 y la acción no quedaba auditada
+const remove = async (id, requestingUser) => {
   const zone = await zoneModel.findById(id)
   if (!zone) {
     const err = new Error('Zona no encontrada')
@@ -155,6 +158,8 @@ const remove = async (id) => {
   // Invalidar caché — la zona desactivada no debe aparecer en listados activos
   await cache.invalidatePattern(`${cache.KEYS.ZONES}:*`)
   await cache.del(`${cache.KEYS.ZONE}:${id}`)
+  // Los horarios públicos de ese barrio tampoco deben seguir apareciendo
+  await cache.invalidatePattern(`${cache.KEYS.SCHEDULES}:*`)
 
   await auditService.record({
     requestingUser,

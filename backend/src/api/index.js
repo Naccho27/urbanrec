@@ -1,6 +1,7 @@
 'use strict'
 
 const { Router } = require('express')
+const { publicLimiter } = require('../shared/middlewares/rateLimit.middleware')
 const router     = Router()
 
 router.use('/auth',              require('../modules/auth/routes/auth.routes'))
@@ -20,6 +21,10 @@ router.use('/ai',                require('../modules/ai/routes/ai.routes'))
 router.use('/export',            require('../modules/analytics/routes/export.routes'))
 
 // ── Rutas públicas ────────────────────────────────────────
+// Sin login: se limitan por IP con publicLimiter (60 por minuto) para
+// frenar bots y scraping sin afectar a un ciudadano que navega normal
+router.use('/public',            publicLimiter)
 router.use('/public/alerts',     require('./public/alerts.routes'))
+router.use('/public/schedules',  require('./public/schedules.routes'))
 
 module.exports = router

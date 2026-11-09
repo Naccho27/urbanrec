@@ -19,22 +19,22 @@ const getById = async (req, res) => {
 }
 
 const create = async (req, res) => {
-  const company = await companyService.create(req.body)
+  const company = await companyService.create(req.body, req.user)
   return ok(res, { company }, 'Empresa creada correctamente', 201)
 }
 
 const update = async (req, res) => {
-  const company = await companyService.update(req.params.id, req.body)
+  const company = await companyService.update(req.params.id, req.body, req.user)
   return ok(res, { company }, 'Empresa actualizada correctamente')
 }
 
 const deactivate = async (req, res) => {
-  const result = await companyService.deactivate(req.params.id)
+  const result = await companyService.deactivate(req.params.id, req.user)
   return ok(res, null, result.message)
 }
 
 const reactivate = async (req, res) => {
-  const company = await companyService.reactivate(req.params.id)
+  const company = await companyService.reactivate(req.params.id, req.user)
   return ok(res, { company }, 'Empresa reactivada correctamente')
 }
 

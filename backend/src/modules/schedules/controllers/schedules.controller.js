@@ -41,7 +41,7 @@ const update = async (req, res) => {
 }
 
 const remove = async (req, res) => {
-  const result = await schedulesService.remove(req.params.id)
+  const result = await schedulesService.remove(req.params.id, req.user)
   return ok(res, null, result.message)
 }
 

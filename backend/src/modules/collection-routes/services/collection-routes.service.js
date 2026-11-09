@@ -5,6 +5,13 @@ const zoneModel     = require('../../zones/models/zone.model')
 const companyModel  = require('../../users/models/company.model')
 const { ROLES }     = require('../../../shared/utils/roles')
 const auditService = require('../../audit/services/audit.service')
+const cache        = require('../../../shared/services/cache.service')
+
+// Los horarios públicos por barrio (GET /public/schedules) se cachean en
+// Redis. Cualquier cambio en recorridos o en sus barrios borra ese caché para que el
+// ciudadano nunca vea un horario viejo.
+const invalidatePublicSchedules = () =>
+  cache.invalidatePattern(`${cache.KEYS.SCHEDULES}:*`)
 
 const getAll = async (filters, requestingUser) => {
   // Operador empresa solo ve sus propios recorridos
@@ -70,6 +77,16 @@ const create = async (data, requestingUser) => {
   // El orden del array define el orden de visita de las zonas
   await routeModel.setZones(id, data.zone_ids)
 
+  await invalidatePublicSchedules()
+
+  await auditService.record({
+    requestingUser,
+    action:     auditService.ACTIONS.CREATE,
+    entity:     auditService.ENTITIES.COLLECTION_ROUTE,
+    entity_id:  id,
+    new_values: data
+  })
+
   return routeModel.findById(id)
 }
 
@@ -99,6 +116,16 @@ const update = async (id, data, requestingUser) => {
     }
     await routeModel.setZones(id, data.zone_ids)
   }
+
+  await invalidatePublicSchedules()
+
+  await auditService.record({
+    requestingUser,
+    action:     auditService.ACTIONS.UPDATE,
+    entity:     auditService.ENTITIES.COLLECTION_ROUTE,
+    entity_id:  parseInt(id),
+    new_values: data
+  })
 
   return routeModel.findById(id)
 }
@@ -135,7 +162,7 @@ const assignCompany = async (id, company_id, requestingUser) => {
   return routeModel.findById(id)
 }
 
-const remove = async (id) => {
+const remove = async (id, requestingUser) => {
   const route = await routeModel.findById(id)
   if (!route) {
     const err = new Error('Recorrido no encontrado')
@@ -143,6 +170,15 @@ const remove = async (id) => {
     throw err
   }
   await routeModel.remove(id)
+  await invalidatePublicSchedules()
+
+  await auditService.record({
+    requestingUser,
+    action:    auditService.ACTIONS.SOFT_DELETE,
+    entity:    auditService.ENTITIES.COLLECTION_ROUTE,
+    entity_id: parseInt(id)
+  })
+
   return { message: 'Recorrido desactivado correctamente' }
 }
 

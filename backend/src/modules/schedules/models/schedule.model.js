@@ -197,8 +197,58 @@ const remove = async (id) => {
   )
 }
 
+// ── Consulta pública (ciudadanos, sin login) ─────────────
+// Cronogramas vigentes que pasan por un barrio. Un barrio puede estar
+// en más de un recorrido (por ejemplo, domiciliarios y reciclables),
+// por eso se llega al cronograma a través de route_zones.
+// Solo devuelve datos de servicio: no expone conductores, recorridos
+// internos ni ids que no necesita el ciudadano.
+// Devuelve null si el barrio no existe o está inactivo.
+const findPublicByZone = async (zoneId) => {
+  const [zoneRows] = await pool.execute(
+    'SELECT id, name FROM zones WHERE id = ? AND is_active = TRUE',
+    [zoneId]
+  )
+  if (!zoneRows[0]) return null
+
+  const [rows] = await pool.execute(
+    `SELECT DISTINCT
+       s.id,
+       s.shift,
+       s.week_days,
+       s.start_time,
+       s.end_time,
+       wt.name  AS waste_type,
+       wt.color AS waste_type_color,
+       c.name   AS company_name
+     FROM route_zones rz
+     INNER JOIN collection_routes cr ON cr.id = rz.collection_route_id
+                                    AND cr.is_active = TRUE
+     INNER JOIN schedules s          ON s.collection_route_id = cr.id
+                                    AND s.is_active = TRUE
+                                    AND s.valid_from <= CURDATE()
+                                    AND (s.valid_until IS NULL OR s.valid_until >= CURDATE())
+     LEFT JOIN waste_types wt        ON wt.id = cr.waste_type_id
+     LEFT JOIN companies c           ON c.id  = s.company_id
+     WHERE rz.zone_id = ?
+     ORDER BY s.start_time ASC`,
+    [zoneId]
+  )
+
+  return {
+    zone: zoneRows[0],
+    schedules: rows.map(row => ({
+      ...row,
+      week_days: typeof row.week_days === 'string'
+        ? JSON.parse(row.week_days)
+        : row.week_days
+    }))
+  }
+}
+
 module.exports = {
   findAll,
+  findPublicByZone,
   findById,
   findActiveForDate,
   create,

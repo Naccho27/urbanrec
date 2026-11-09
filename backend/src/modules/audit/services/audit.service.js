@@ -32,6 +32,7 @@ const ENTITIES = Object.freeze({
   ZONE:             'zone',
   COLLECTION_ROUTE: 'collection_route',
   SCHEDULE:         'schedule',
+  WASTE_TYPE:       'waste_type',
   EXECUTION:        'route_execution',
   INCIDENT:         'incident',
   AI_SUGGESTION:    'ai_suggestion',

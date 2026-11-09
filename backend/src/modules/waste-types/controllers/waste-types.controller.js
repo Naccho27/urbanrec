@@ -19,17 +19,17 @@ const getById = async (req, res) => {
 }
 
 const create = async (req, res) => {
-  const wasteType = await wasteTypesService.create(req.body)
+  const wasteType = await wasteTypesService.create(req.body, req.user)
   return ok(res, { wasteType }, 'Tipo de residuo creado correctamente', 201)
 }
 
 const update = async (req, res) => {
-  const wasteType = await wasteTypesService.update(req.params.id, req.body)
+  const wasteType = await wasteTypesService.update(req.params.id, req.body, req.user)
   return ok(res, { wasteType }, 'Tipo de residuo actualizado correctamente')
 }
 
 const remove = async (req, res) => {
-  const result = await wasteTypesService.remove(req.params.id)
+  const result = await wasteTypesService.remove(req.params.id, req.user)
   return ok(res, null, result.message)
 }
 

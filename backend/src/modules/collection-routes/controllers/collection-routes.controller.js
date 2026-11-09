@@ -41,7 +41,7 @@ const assignCompany = async (req, res) => {
 }
 
 const remove = async (req, res) => {
-  const result = await routesService.remove(req.params.id)
+  const result = await routesService.remove(req.params.id, req.user)
   return ok(res, null, result.message)
 }
 
