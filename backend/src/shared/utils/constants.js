@@ -48,6 +48,8 @@ const NOTIFICATION_TYPES = Object.freeze({
   INCIDENT_RESOLVED:  'incident_resolved',
   LICENSE_EXPIRING:   'license_expiring',
   GPS_INACTIVITY:     'gps_inactivity',
+  ROUTE_NOT_STARTED:  'route_not_started',  // pasó la hora de inicio + tolerancia sin arrancar
+  ROUTE_INCOMPLETE:   'route_incomplete',   // finalizó sin recolectar todos los barrios
   SYNC_PENDING:       'sync_pending',
   SERVICE_ALERT:      'service_alert'    // ← aviso público del municipio a ciudadanos
 })

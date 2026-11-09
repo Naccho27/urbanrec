@@ -215,7 +215,7 @@ const completeExecution = async (executionId, conductorId, notes = null) => {
   await notifService.notifyRouteCompleted(
     conductorId,
     execution.route_name,
-    execution.company_id
+    executionId
   )
 
   return trackingModel.findExecutionById(executionId)

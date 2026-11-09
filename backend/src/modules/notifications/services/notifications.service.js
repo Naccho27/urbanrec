@@ -67,14 +67,16 @@ const send = async ({ userId, type, title, body, entity = null, entity_id = null
 }
 
 // Notificaciones predefinidas para los eventos más comunes
-const notifyRouteCompleted = async (userId, routeName, companyId) => {
+// entity_id apunta a la ejecución que terminó (antes guardaba el
+// company_id con entity 'collection_route', que no identificaba nada)
+const notifyRouteCompleted = async (userId, routeName, executionId) => {
   await send({
     userId,
     type:      NOTIFICATION_TYPES.ROUTE_COMPLETED,
     title:     'Recorrido completado',
     body:      `El recorrido "${routeName}" fue completado correctamente.`,
-    entity:    'collection_route',
-    entity_id: companyId
+    entity:    'route_execution',
+    entity_id: executionId
   })
 }
 
@@ -91,23 +93,76 @@ const notifyIncident = async (municipalUserIds, incident) => {
   }
 }
 
-const notifyRouteDelayed = async (userId, routeName) => {
+// ── Alertas automáticas (las dispara alerts.service.js) ──
+// Todas guardan entity = 'route_execution' (o 'user' en licencias) y el
+// id correspondiente: así alerts.service puede saber si ya avisó y no
+// repetir el mismo aviso cada minuto.
+
+const notifyRouteDelayed = async (userId, { executionId, routeName, elapsedMin }) => {
   await send({
     userId,
     type:  NOTIFICATION_TYPES.ROUTE_DELAYED,
     title: 'Alerta de demora',
-    body:  `El recorrido "${routeName}" superó el tiempo máximo estimado.`,
-    entity: 'collection_route'
+    body:  `El recorrido "${routeName}" lleva ${formatMinutes(elapsedMin)} en curso y superó el tiempo máximo permitido.`,
+    entity:    'route_execution',
+    entity_id: executionId
   })
 }
 
-const notifyLicenseExpiring = async (userId, conductorName, expiryDate) => {
+const notifyLicenseExpiring = async (userId, { conductorId, conductorName, expiryDate }) => {
   await send({
     userId,
     type:  NOTIFICATION_TYPES.LICENSE_EXPIRING,
     title: 'Licencia por vencer',
-    body:  `La licencia del conductor ${conductorName} vence el ${expiryDate}.`
+    body:  `La licencia del conductor ${conductorName} vence el ${formatDate(expiryDate)}.`,
+    entity:    'user',
+    entity_id: conductorId
   })
+}
+
+const notifyRouteNotStarted = async (userId, { executionId, routeName, lateMin }) => {
+  await send({
+    userId,
+    type:  NOTIFICATION_TYPES.ROUTE_NOT_STARTED,
+    title: 'Recorrido sin iniciar',
+    body:  `El recorrido "${routeName}" debía comenzar hace ${formatMinutes(lateMin)} y todavía no se inició.`,
+    entity:    'route_execution',
+    entity_id: executionId
+  })
+}
+
+const notifyGpsInactivity = async (userId, { executionId, routeName, conductorName, silentMin }) => {
+  await send({
+    userId,
+    type:  NOTIFICATION_TYPES.GPS_INACTIVITY,
+    title: 'Sin señal GPS',
+    body:  `El recorrido "${routeName}"${conductorName ? ` (${conductorName})` : ''} no envía su posición hace ${formatMinutes(silentMin)}. Puede ser falta de señal, batería agotada o el camión detenido.`,
+    entity:    'route_execution',
+    entity_id: executionId
+  })
+}
+
+const notifyRouteIncomplete = async (userId, { executionId, routeName, completionPct, zonesVisited, zonesTotal }) => {
+  await send({
+    userId,
+    type:  NOTIFICATION_TYPES.ROUTE_INCOMPLETE,
+    title: 'Recorrido incompleto',
+    body:  `El recorrido "${routeName}" finalizó con ${completionPct}% de cobertura (${zonesVisited} de ${zonesTotal} barrios).`,
+    entity:    'route_execution',
+    entity_id: executionId
+  })
+}
+
+// Formatos legibles para el cuerpo de las notificaciones
+const formatMinutes = (min) => {
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return h > 0 ? `${h} h ${m} min` : `${m} min`
+}
+
+const formatDate = (date) => {
+  const d = date instanceof Date ? date : new Date(date)
+  return d.toLocaleDateString('es-AR')
 }
 
 // Envía un aviso de servicio público a todos los ciudadanos de una zona
@@ -168,5 +223,8 @@ module.exports = {
   notifyIncident,
   notifyRouteDelayed,
   notifyLicenseExpiring,
+  notifyRouteNotStarted,
+  notifyGpsInactivity,
+  notifyRouteIncomplete,
   broadcastServiceAlert
 }
