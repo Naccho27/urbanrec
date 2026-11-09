@@ -128,7 +128,8 @@ const predictDemand = async (zone_id, requestingUserId) => {
   // El cronograma se une por re.schedule_id (el que se ejecutó), no por
   // recorrido: si un recorrido tuviera dos cronogramas, se duplicaría.
   // avg_duration_min: duración real; es la mejor señal del volumen de
-  // residuos (lo usará la próxima versión del modelo de predicción).
+  // residuos. predict.py la compara con la duración típica del barrio
+  // para calcular el índice de carga de cada día y turno.
   const [histRows] = await pool.execute(
     `SELECT
       DAYOFWEEK(re.execution_date)  AS day_of_week,
