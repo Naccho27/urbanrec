@@ -15,6 +15,7 @@ const findByEmail = async (email) => {
       role,
       company_id,
       totp_secret,
+      totp_pending_secret,
       totp_enabled,
       is_active,
       deleted_at

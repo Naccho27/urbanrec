@@ -13,6 +13,7 @@ const {
   loginRules,
   verifyTOTPLoginRules,
   enableTOTPRules,
+  setupTOTPRules,
   disableTOTPRules,
   refreshTokenRules
 } = require('../validators/auth.validator')
@@ -72,6 +73,8 @@ router.post('/refresh',
 // POST /api/v1/auth/2fa/setup  (genera QR)
 router.post('/2fa/setup',
   verifyJWT,
+  setupTOTPRules,
+  validate,
   asyncWrapper(authController.setupTOTP)
 )
 

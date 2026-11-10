@@ -223,53 +223,96 @@ const logout = async (req, res) => {
 }
 
 // ── Setup TOTP (requiere JWT) ─────────────────────────────
+// Genera un secret nuevo y su QR. El secret queda en totp_pending_secret:
+// recién reemplaza al activo cuando el usuario lo confirma con un código
+// en /2fa/enable. Así, si no termina la configuración, su autenticador
+// anterior sigue funcionando.
+//
+// Si el 2FA ya está activo, se exige la contraseña y un código de la app
+// actual. Sin esto, alguien con una sesión robada podía vincular el 2FA
+// a su propio celular sin conocer ninguno de los dos factores.
 const setupTOTP = async (req, res) => {
   const userId = req.user.id
   const email  = req.user.email
+  const { password, token } = req.body
+
+  const [rows] = await pool.execute(
+    'SELECT password_hash, totp_secret, totp_enabled FROM users WHERE id = ?',
+    [userId]
+  )
+  const user = rows[0]
+  if (!user) {
+    return fail(res, 'Usuario no encontrado', 404)
+  }
+
+  if (user.totp_enabled) {
+    if (!password || !token) {
+      return fail(res, 'El 2FA ya está activo. Para reconfigurarlo envíe su contraseña y un código de su app actual', 400)
+    }
+    const passwordOk = await authService.comparePassword(password, user.password_hash)
+    if (!passwordOk) {
+      await auditAuth(req, req.user, auditService.ACTIONS.LOGIN_FAILED, { reason: 'contraseña incorrecta al reconfigurar 2FA' })
+      return fail(res, 'Contraseña incorrecta', 401)
+    }
+    if (!totpService.verifyTotpToken(user.totp_secret, token)) {
+      await auditAuth(req, req.user, auditService.ACTIONS.LOGIN_FAILED, { reason: 'código TOTP inválido al reconfigurar 2FA' })
+      return fail(res, 'Código de autenticación inválido', 401)
+    }
+  }
 
   const secret          = totpService.generateSecret(email)
   const encryptedSecret = totpService.encryptSecret(secret)
   const qrCode          = await totpService.generateQR(secret, email)
 
   await pool.execute(
-    'UPDATE users SET totp_secret = ? WHERE id = ?',
+    'UPDATE users SET totp_pending_secret = ? WHERE id = ?',
     [encryptedSecret, userId]
   )
 
-  // Generar un secret nuevo invalida el autenticador anterior: se audita
-  // (sin guardar el secret, solo el hecho)
-  await auditAuth(req, req.user, auditService.ACTIONS.UPDATE, { totp_secret: 'regenerado' })
+  // Se audita el hecho, nunca el secret
+  await auditAuth(req, req.user, auditService.ACTIONS.UPDATE, { totp_secret: 'nuevo QR generado, pendiente de confirmar' })
 
   return ok(res, { qrCode, manualCode: secret },
     'QR generado. Escanee con Google Authenticator o Authy y confirme con un código')
 }
 
 // ── Enable TOTP (requiere JWT) ────────────────────────────
+// Confirma el secret pendiente con un código de la app nueva y recién
+// ahí lo pasa a totp_secret. Sirve tanto para activar el 2FA por primera
+// vez como para cambiar de celular.
 const enableTOTP = async (req, res) => {
   const { token } = req.body
   const userId    = req.user.id
 
   const [rows] = await pool.execute(
-    'SELECT totp_secret FROM users WHERE id = ?',
+    'SELECT totp_secret, totp_pending_secret, totp_enabled FROM users WHERE id = ?',
     [userId]
   )
   const user = rows[0]
 
-  if (!user || !user.totp_secret) {
-    return fail(res, 'Primero debe configurar TOTP con /2fa/setup', 400)
+  // Compatibilidad: usuarios que generaron el QR antes de este cambio
+  // tienen el secret sin confirmar directamente en totp_secret
+  const pending = user?.totp_pending_secret ||
+                  (!user?.totp_enabled ? user?.totp_secret : null)
+
+  if (!pending) {
+    return fail(res, 'Primero debe generar el QR con /2fa/setup', 400)
   }
 
-  const valid = totpService.verifyTotpToken(user.totp_secret, token)
+  const valid = totpService.verifyTotpToken(pending, token)
   if (!valid) {
     return fail(res, 'Código inválido. Intente nuevamente', 401)
   }
 
   await pool.execute(
-    'UPDATE users SET totp_enabled = TRUE WHERE id = ?',
-    [userId]
+    `UPDATE users
+     SET totp_secret = ?, totp_pending_secret = NULL, totp_enabled = TRUE
+     WHERE id = ?`,
+    [pending, userId]
   )
 
-  await auditAuth(req, req.user, auditService.ACTIONS.TOTP_ENABLED)
+  await auditAuth(req, req.user, auditService.ACTIONS.TOTP_ENABLED,
+    user.totp_enabled ? { cambio_de_dispositivo: true } : null)
 
   return ok(res, null, 'Autenticación de dos factores activada correctamente')
 }
@@ -304,7 +347,7 @@ const disableTOTP = async (req, res) => {
   }
 
   await pool.execute(
-    'UPDATE users SET totp_enabled = FALSE, totp_secret = NULL WHERE id = ?',
+    'UPDATE users SET totp_enabled = FALSE, totp_secret = NULL, totp_pending_secret = NULL WHERE id = ?',
     [userId]
   )
 
@@ -340,8 +383,9 @@ const initialSetupTOTP = async (req, res) => {
   const encryptedSecret = totpService.encryptSecret(secret)
   const qrCode          = await totpService.generateQR(secret, user.email)
 
+  // Igual que /2fa/setup: queda pendiente hasta confirmar con un código
   await pool.execute(
-    'UPDATE users SET totp_secret = ? WHERE id = ?',
+    'UPDATE users SET totp_pending_secret = ? WHERE id = ?',
     [encryptedSecret, user.id]
   )
 
@@ -368,22 +412,26 @@ const initialEnableTOTP = async (req, res) => {
     return fail(res, 'Esta ruta es solo para administradores', 403)
   }
 
-  if (!user.totp_secret) {
-    return fail(res, 'Primero ejecute /2fa/initial-setup', 400)
-  }
-
   if (user.totp_enabled) {
     return fail(res, 'TOTP ya está activo', 400)
   }
 
-  const valid = totpService.verifyTotpToken(user.totp_secret, token)
+  // Compatibilidad con QR generados antes del cambio (en totp_secret)
+  const pending = user.totp_pending_secret || user.totp_secret
+  if (!pending) {
+    return fail(res, 'Primero ejecute /2fa/initial-setup', 400)
+  }
+
+  const valid = totpService.verifyTotpToken(pending, token)
   if (!valid) {
     return fail(res, 'Código inválido. Intente nuevamente', 401)
   }
 
   await pool.execute(
-    'UPDATE users SET totp_enabled = TRUE WHERE id = ?',
-    [user.id]
+    `UPDATE users
+     SET totp_secret = ?, totp_pending_secret = NULL, totp_enabled = TRUE
+     WHERE id = ?`,
+    [pending, user.id]
   )
 
   await auditAuth(req, user, auditService.ACTIONS.TOTP_ENABLED, { primer_ingreso: true })

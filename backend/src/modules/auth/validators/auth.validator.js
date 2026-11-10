@@ -34,6 +34,20 @@ const enableTOTPRules = [
     .isNumeric().withMessage('El código debe ser numérico')
 ]
 
+// Reglas para POST /auth/2fa/setup
+// Opcionales porque la primera configuración no las necesita. Si el 2FA
+// ya está activo, el controller exige ambas antes de generar otro QR.
+const setupTOTPRules = [
+  body('token')
+    .optional()
+    .isLength({ min: 6, max: 6 }).withMessage('El código debe tener exactamente 6 dígitos')
+    .isNumeric().withMessage('El código debe ser numérico'),
+
+  body('password')
+    .optional()
+    .notEmpty().withMessage('La contraseña no puede estar vacía')
+]
+
 // Reglas para POST /auth/2fa/disable
 const disableTOTPRules = [
   body('token')
@@ -55,6 +69,7 @@ module.exports = {
   loginRules,
   verifyTOTPLoginRules,
   enableTOTPRules,
+  setupTOTPRules,
   disableTOTPRules,
   refreshTokenRules
 }
